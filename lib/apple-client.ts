@@ -1,3 +1,11 @@
+/**
+ * App Store Server API client for StoreKit 2 transaction verification.
+ *
+ * ⚠️ Use App Store Connect API Key (NOT In-App Purchase key):
+ *    App Store Connect → Users and Access → Keys → App Store Connect API → Generate API Key
+ *
+ * ❌ Do NOT use: In-App Purchase key (Integrations), Shared secret, App-specific password
+ */
 import {
   AppStoreServerAPIClient,
   Environment,
@@ -9,11 +17,20 @@ function loadSigningKey(): string {
   const keyFromEnv = process.env.APPLE_SIGNING_KEY;
   if (!keyFromEnv?.trim()) {
     throw new Error(
-      "Set APPLE_SIGNING_KEY with the full .p8 file contents (paste in Vercel env, use \\n for newlines if needed)."
+      "Set APPLE_SIGNING_KEY with the full .p8 file contents. In Vercel, use \\n instead of real newlines (Vercel strips them)."
     );
   }
 
-  return keyFromEnv.replace(/\\n/g, "\n").trim();
+  // Vercel stores env vars as single-line; ES256 requires multiline PEM. Restore newlines.
+  const privateKey = keyFromEnv.replace(/\\n/g, "\n").trim();
+
+  if (!privateKey.includes("-----BEGIN PRIVATE KEY-----") || !privateKey.includes("-----END PRIVATE KEY-----")) {
+    throw new Error(
+      "APPLE_SIGNING_KEY must include -----BEGIN PRIVATE KEY----- and -----END PRIVATE KEY-----. Paste the full .p8 contents."
+    );
+  }
+
+  return privateKey;
 }
 
 export function getAppleApiClient(): AppStoreServerAPIClient {
