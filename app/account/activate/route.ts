@@ -4,17 +4,21 @@ import {
   getAppleApiClient,
   decodeJwsPayload,
 } from "@/lib/apple-client";
+import { randomBytes } from "crypto";
 
 type ActivateBody = {
   email?: string;
   receipt?: string;
   platform?: string;
+  first_name?: string;
+  last_name?: string;
 };
 
 /**
  * POST /account/activate
- * Body: { email, receipt, platform: "ios" }
- * Validates StoreKit 2 JWS via App Store Server API (.p8 key).
+ * Validates receipt FIRST. Only creates/updates client after successful verification.
+ * Body: { email, receipt, platform } (required). { first_name, last_name } optional, only sent when non-empty.
+ * For existing inactive clients who resubscribe, body is { email, receipt, platform }.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -32,6 +36,8 @@ export async function POST(request: NextRequest) {
       typeof body.email === "string" ? body.email.trim().toLowerCase() : undefined;
     const receipt = typeof body.receipt === "string" ? body.receipt.trim() : undefined;
     const platform = typeof body.platform === "string" ? body.platform.toLowerCase() : undefined;
+    const firstName = typeof body.first_name === "string" ? body.first_name.trim() : "";
+    const lastName = typeof body.last_name === "string" ? body.last_name.trim() : "";
 
     if (!email) {
       return NextResponse.json(
@@ -54,6 +60,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 1. VALIDATE RECEIPT FIRST – do not touch DB until this succeeds
     let transactionId: string;
 
     try {
@@ -99,34 +106,65 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 2. Receipt validated – now create or update client
     const supabase = getSupabase();
 
-    const { data, error } = await supabase
+    const { data: existingClient } = await supabase
       .from("clients")
-      .update({
-        is_active: true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("email", email)
       .select("id")
+      .eq("email", email)
       .maybeSingle();
 
-    if (error) {
-      console.error("Activate DB error:", error);
-      return NextResponse.json(
-        { error: "Failed to activate subscription" },
-        { status: 500 }
-      );
+    const name = [firstName, lastName].filter(Boolean).join(" ") || email.split("@")[0] || "Client";
+
+    if (existingClient) {
+      const { error } = await supabase
+        .from("clients")
+        .update({
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("email", email);
+
+      if (error) {
+        console.error("Activate update error:", error);
+        return NextResponse.json(
+          { error: "Failed to activate subscription" },
+          { status: 500 }
+        );
+      }
+    } else {
+      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
+        email,
+        password: randomBytes(32).toString("base64url"),
+        email_confirm: true,
+      });
+
+      if (authError || !authUser.user) {
+        console.error("Auth user creation failed:", authError);
+        return NextResponse.json(
+          { error: "Failed to create account" },
+          { status: 500 }
+        );
+      }
+
+      const { error: insertError } = await supabase.from("clients").insert({
+        id: authUser.user.id,
+        email,
+        name,
+        is_active: true,
+      });
+
+      if (insertError) {
+        console.error("Client insert error:", insertError);
+        return NextResponse.json(
+          { error: "Failed to create client record" },
+          { status: 500 }
+        );
+      }
     }
 
-    if (!data) {
-      return NextResponse.json(
-        { error: "No account found for this email" },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json({ success: true });
+    return new NextResponse(null, { status: 204 });
   } catch (err) {
     console.error("Activate error:", err);
     return NextResponse.json(

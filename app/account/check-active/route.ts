@@ -3,7 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 
 /**
  * GET /account/check-active?email=client@example.com
- * Returns { active: boolean } based on is_active.
+ * Returns { exists: boolean, is_active: boolean }.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -30,9 +30,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const active = client?.is_active === true;
+    const exists = client != null;
+    const is_active = client?.is_active === true;
 
-    return NextResponse.json({ active }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ exists, is_active }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("check-active error:", err);
     return NextResponse.json(
