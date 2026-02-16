@@ -7,6 +7,10 @@ out/
 
 # Env
 .env*.local
+.env
+
+# Apple In-App Purchase private key (never commit)
+*.p8
 
 # Debug
 npm-debug.log*
