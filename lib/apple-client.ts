@@ -8,13 +8,19 @@ import * as path from "path";
 let client: AppStoreServerAPIClient | null = null;
 
 function loadSigningKey(): string {
+  // Prefer env var (for Vercel/serverless where .p8 is gitignored)
+  const keyFromEnv = process.env.APPLE_SIGNING_KEY;
+  if (keyFromEnv?.trim()) {
+    return keyFromEnv.trim();
+  }
+
   const keyPath =
     process.env.APPLE_KEY_PATH ??
     path.join(process.cwd(), "certs", "AuthKey_RM36D2V4T6.p8");
 
   if (!fs.existsSync(keyPath)) {
     throw new Error(
-      `Apple signing key not found at ${keyPath}. Set APPLE_KEY_PATH or place AuthKey_*.p8 in certs/.`
+      "Apple signing key not found. Set APPLE_SIGNING_KEY (raw .p8 contents) or APPLE_KEY_PATH, or place AuthKey_*.p8 in certs/."
     );
   }
 
