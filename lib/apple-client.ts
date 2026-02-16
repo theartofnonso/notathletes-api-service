@@ -2,35 +2,24 @@ import {
   AppStoreServerAPIClient,
   Environment,
 } from "@apple/app-store-server-library";
-import * as fs from "fs";
-import * as path from "path";
 
 let client: AppStoreServerAPIClient | null = null;
 
 function loadSigningKey(): string {
-  // Prefer env var (for Vercel/serverless where .p8 is gitignored)
   const keyFromEnv = process.env.APPLE_SIGNING_KEY;
   if (keyFromEnv?.trim()) {
-    return keyFromEnv.trim();
+    return keyFromEnv.replace(/\\n/g, "\n").trim();
   }
 
-  const keyPath =
-    process.env.APPLE_KEY_PATH ??
-    path.join(process.cwd(), "certs", "AuthKey_RM36D2V4T6.p8");
-
-  if (!fs.existsSync(keyPath)) {
-    throw new Error(
-      "Apple signing key not found. Set APPLE_SIGNING_KEY (raw .p8 contents) or APPLE_KEY_PATH, or place AuthKey_*.p8 in certs/."
-    );
-  }
-
-  return fs.readFileSync(keyPath, "utf-8");
+  throw new Error(
+    "Set APPLE_SIGNING_KEY with the full .p8 file contents (paste in Vercel env, use \\n for newlines if needed)."
+  );
 }
 
 export function getAppleApiClient(): AppStoreServerAPIClient {
   if (client) return client;
 
-  const keyId = process.env.APPLE_KEY_ID ?? "RM36D2V4T6";
+  const keyId = process.env.APPLE_KEY_ID ?? "RMRR57VC78";
   const issuerId = process.env.APPLE_ISSUER_ID;
   const bundleId = process.env.APPLE_BUNDLE_ID;
 
