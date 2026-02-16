@@ -6,15 +6,12 @@ type ActivateBody = {
   email?: string;
   first_name?: string;
   last_name?: string;
-  receipt?: string;
-  platform?: string;
 };
 
 /**
  * POST /account/activate
  * Creates or activates a client. Sets is_active = true.
  * Body: { email } required. { first_name, last_name } optional.
- * receipt, platform accepted but ignored (no IAP verification).
  */
 export async function POST(request: NextRequest) {
   try {
