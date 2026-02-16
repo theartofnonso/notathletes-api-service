@@ -7,19 +7,19 @@ let client: AppStoreServerAPIClient | null = null;
 
 function loadSigningKey(): string {
   const keyFromEnv = process.env.APPLE_SIGNING_KEY;
-  if (keyFromEnv?.trim()) {
-    return keyFromEnv.replace(/\\n/g, "\n").trim();
+  if (!keyFromEnv?.trim()) {
+    throw new Error(
+      "Set APPLE_SIGNING_KEY with the full .p8 file contents (paste in Vercel env, use \\n for newlines if needed)."
+    );
   }
 
-  throw new Error(
-    "Set APPLE_SIGNING_KEY with the full .p8 file contents (paste in Vercel env, use \\n for newlines if needed)."
-  );
+  return keyFromEnv.replace(/\\n/g, "\n").trim();
 }
 
 export function getAppleApiClient(): AppStoreServerAPIClient {
   if (client) return client;
 
-  const keyId = process.env.APPLE_KEY_ID ?? "RMRR57VC78";
+  const keyId = process.env.APPLE_KEY_ID ?? "7874ZAA5SY";
   const issuerId = process.env.APPLE_ISSUER_ID;
   const bundleId = process.env.APPLE_BUNDLE_ID;
 
