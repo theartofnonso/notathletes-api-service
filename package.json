@@ -9,11 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "^2.0.0",
     "@supabase/supabase-js": "^2.47.0",
-    "resend": "^4.0.0",
     "next": "15.x",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "resend": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^22",
