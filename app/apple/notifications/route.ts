@@ -4,6 +4,7 @@ import {
   NotificationTypeV2,
   SignedDataVerifier,
   Subtype,
+  VerificationStatus,
 } from "@apple/app-store-server-library";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -19,7 +20,7 @@ type MappedStatus = {
   status: string;
 };
 
-let verifier: SignedDataVerifier | null = null;
+const verifierCache = new Map<Environment, SignedDataVerifier>();
 
 function parseRootsFromEnv(): Buffer[] {
   const roots = process.env.APPLE_ROOT_CA_CERTS_BASE64 ?? "";
@@ -39,32 +40,42 @@ function isFuture(date: Date | null): boolean {
   return !!date && date.getTime() > Date.now();
 }
 
-function getVerifier(): SignedDataVerifier {
-  if (verifier) return verifier;
+function getConfiguredEnvironment(): Environment {
+  const rawEnv = process.env.APPLE_SERVER_ENVIRONMENT?.toLowerCase();
+  if (rawEnv === "sandbox") return Environment.SANDBOX;
+  if (rawEnv === "production") return Environment.PRODUCTION;
+  throw new Error(
+    "Apple notifications not configured. Set APPLE_SERVER_ENVIRONMENT to sandbox or production."
+  );
+}
+
+function getVerifierForEnvironment(environment: Environment): SignedDataVerifier {
+  const cached = verifierCache.get(environment);
+  if (cached) return cached;
 
   const roots = parseRootsFromEnv();
   const bundleId = process.env.APPLE_BUNDLE_ID;
-  const rawEnv = process.env.APPLE_SERVER_ENVIRONMENT?.toLowerCase();
   const appAppleId =
     process.env.APPLE_APP_ID && Number.isFinite(Number(process.env.APPLE_APP_ID))
       ? Number(process.env.APPLE_APP_ID)
       : undefined;
 
-  if (!roots.length || !bundleId || (rawEnv !== "sandbox" && rawEnv !== "production")) {
+  if (!roots.length || !bundleId) {
     throw new Error(
       "Apple notifications not configured. Set APPLE_ROOT_CA_CERTS_BASE64, APPLE_BUNDLE_ID, and APPLE_SERVER_ENVIRONMENT."
     );
   }
 
-  verifier = new SignedDataVerifier(
+  const created = new SignedDataVerifier(
     roots,
     true,
-    rawEnv === "sandbox" ? Environment.SANDBOX : Environment.PRODUCTION,
+    environment,
     bundleId,
     appAppleId
   );
 
-  return verifier;
+  verifierCache.set(environment, created);
+  return created;
 }
 
 function mapSubscriptionStatus(
@@ -122,20 +133,47 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "signedPayload is required" }, { status: 400 });
   }
 
-  let appleVerifier: SignedDataVerifier;
+  let configuredEnvironment: Environment;
+  let primaryVerifier: SignedDataVerifier;
   try {
-    appleVerifier = getVerifier();
+    configuredEnvironment = getConfiguredEnvironment();
+    primaryVerifier = getVerifierForEnvironment(configuredEnvironment);
   } catch (err) {
     console.error("Apple notification configuration error:", err);
     return NextResponse.json({ error: "Webhook misconfigured" }, { status: 500 });
   }
 
+  let appleVerifier = primaryVerifier;
   let decodedNotification;
   try {
     decodedNotification = await appleVerifier.verifyAndDecodeNotification(body.signedPayload);
   } catch (err) {
-    console.error("Apple notification verification failed:", err);
-    return NextResponse.json({ error: "Invalid signedPayload" }, { status: 400 });
+    const shouldRetryWithOtherEnvironment =
+      typeof err === "object" &&
+      err !== null &&
+      "status" in err &&
+      (err as { status?: number }).status === VerificationStatus.INVALID_ENVIRONMENT;
+
+    if (!shouldRetryWithOtherEnvironment) {
+      console.error("Apple notification verification failed:", err);
+      return NextResponse.json({ error: "Invalid signedPayload" }, { status: 400 });
+    }
+
+    const fallbackEnvironment =
+      configuredEnvironment === Environment.SANDBOX
+        ? Environment.PRODUCTION
+        : Environment.SANDBOX;
+
+    try {
+      appleVerifier = getVerifierForEnvironment(fallbackEnvironment);
+      decodedNotification = await appleVerifier.verifyAndDecodeNotification(body.signedPayload);
+      console.warn(
+        `Apple notification verified using fallback environment: ${fallbackEnvironment}`
+      );
+    } catch (fallbackErr) {
+      console.error("Apple notification verification failed:", fallbackErr);
+      return NextResponse.json({ error: "Invalid signedPayload" }, { status: 400 });
+    }
   }
 
   const notificationUUID = decodedNotification.notificationUUID;
