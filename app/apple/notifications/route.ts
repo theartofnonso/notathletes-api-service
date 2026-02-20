@@ -42,6 +42,9 @@ function isFuture(date: Date | null): boolean {
 
 function getConfiguredEnvironment(): Environment {
   const rawEnv = process.env.APPLE_SERVER_ENVIRONMENT?.toLowerCase();
+  console.info(
+    `Apple webhook configured environment raw="${process.env.APPLE_SERVER_ENVIRONMENT ?? "undefined"}"`
+  );
   if (rawEnv === "sandbox") return Environment.SANDBOX;
   if (rawEnv === "production") return Environment.PRODUCTION;
   throw new Error(
@@ -146,6 +149,7 @@ export async function POST(request: NextRequest) {
   let appleVerifier = primaryVerifier;
   let decodedNotification;
   try {
+    console.info(`Apple webhook verifier attempt environment="${configuredEnvironment}"`);
     decodedNotification = await appleVerifier.verifyAndDecodeNotification(body.signedPayload);
   } catch (err) {
     const shouldRetryWithOtherEnvironment =
@@ -166,6 +170,9 @@ export async function POST(request: NextRequest) {
 
     try {
       appleVerifier = getVerifierForEnvironment(fallbackEnvironment);
+      console.warn(
+        `Apple webhook retrying verifier with fallback environment="${fallbackEnvironment}"`
+      );
       decodedNotification = await appleVerifier.verifyAndDecodeNotification(body.signedPayload);
       console.warn(
         `Apple notification verified using fallback environment: ${fallbackEnvironment}`
