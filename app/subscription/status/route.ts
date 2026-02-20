@@ -2,15 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
 /**
- * GET /subscription/status?id=<client_uuid>
+ * GET /subscription/status?user_id=<client_uuid>
  * Returns { access: boolean } from webhook-maintained subscription state.
  */
 export async function GET(request: NextRequest) {
   try {
-    const rawId = request.nextUrl.searchParams.get("id");
+    const rawId = request.nextUrl.searchParams.get("user_id");
     if (!rawId?.trim()) {
       return NextResponse.json(
-        { error: "id query parameter is required" },
+        { error: "user_id query parameter is required" },
         { status: 400 }
       );
     }
