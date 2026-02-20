@@ -2,26 +2,26 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
 /**
- * GET /subscription/status?email=client@example.com
+ * GET /subscription/status?id=<client_uuid>
  * Returns { access: boolean } from webhook-maintained subscription state.
  */
 export async function GET(request: NextRequest) {
   try {
-    const rawEmail = request.nextUrl.searchParams.get("email");
-    if (!rawEmail?.trim()) {
+    const rawId = request.nextUrl.searchParams.get("id");
+    if (!rawId?.trim()) {
       return NextResponse.json(
-        { error: "email query parameter is required" },
+        { error: "id query parameter is required" },
         { status: 400 }
       );
     }
 
-    const email = rawEmail.trim().toLowerCase();
+    const id = rawId.trim();
     const supabase = getSupabase();
 
     const { data: client, error } = await supabase
       .from("clients")
       .select("subscription_status, subscription_expires_at")
-      .eq("email", email)
+      .eq("id", id)
       .maybeSingle();
 
     if (error) {
