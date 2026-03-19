@@ -11,7 +11,7 @@ function escapeHtml(text: string): string {
 
 export function getWelcomeEmailTemplate(
   name: string,
-  baseUrl: string = "https://www.notathletes.com"
+  baseUrl: string
 ): string {
   return `
 <!DOCTYPE html>

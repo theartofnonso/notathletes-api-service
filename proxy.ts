@@ -3,7 +3,12 @@ import type { NextRequest } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 
 // Replace with your protected path prefixes (e.g. /api/secure, /dashboard)
-const PROTECTED_PATHS = ["/account/delete"];
+const PROTECTED_PATHS = [
+  "/account/delete",
+  "/account/profile",
+  "/coach-clients",
+  "/subscription/status",
+];
 
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;

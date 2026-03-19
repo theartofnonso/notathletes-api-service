@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { URLs } from "@/lib/urls";
 
 type CoachClientBody = {
   coach_id?: string;
@@ -84,6 +85,19 @@ export async function POST(request: NextRequest) {
         { error: "Failed to assign client to coach" },
         { status: 500 }
       );
+    }
+
+    // Notify FCM service of new assignment (forward caller's auth token)
+    const authHeader = request.headers.get("Authorization");
+    if (authHeader) {
+      fetch(URLs.FCM_NOTIFY_CLIENT_ASSIGNED, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authHeader,
+        },
+        body: JSON.stringify({ userId: clientId }),
+      }).catch((err) => console.error("Notify client assigned error:", err));
     }
 
     return NextResponse.json({ ok: true, coach_client: record }, { status: 201 });
