@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { formatCoachProfile } from "@/lib/coach-profile-format";
 
 /** Public fields returned for display (excludes verification URLs, email) */
 const PUBLIC_SELECT =
@@ -34,8 +35,9 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const formatted = (profiles ?? []).map(formatCoachProfile);
     return NextResponse.json(
-      { profiles: profiles ?? [], limit, offset },
+      { profiles: formatted, limit, offset },
       { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" } }
     );
   } catch (err) {

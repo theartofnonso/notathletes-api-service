@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { formatCoachProfile } from "@/lib/coach-profile-format";
 
 /** Public fields returned for display (excludes verification URLs, email) */
 const PUBLIC_SELECT =
@@ -40,7 +41,7 @@ export async function GET(
       return NextResponse.json({ error: "Coach profile not found" }, { status: 404 });
     }
 
-    return NextResponse.json(profile, {
+    return NextResponse.json(formatCoachProfile(profile), {
       headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=120" },
     });
   } catch (err) {
