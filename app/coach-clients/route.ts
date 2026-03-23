@@ -15,6 +15,7 @@ const UUID_REGEX =
  * Assigns a client to a coach. Inserts into coach_clients.
  * Body: { coach_id, client_id }
  * Fails with 409 if link already exists.
+ * 
  */
 export async function POST(request: NextRequest) {
   try {
