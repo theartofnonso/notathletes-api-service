@@ -119,5 +119,20 @@ export async function POST(request: NextRequest) {
     return fail("Failed to create client and assign coach", 500);
   }
 
-  return NextResponse.json({ success: true }, { status: 200 });
+  const { data: signInData, error: signInError } =
+    await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+  if (signInError || !signInData.session?.refresh_token) {
+    console.error("client-coach-signup signIn:", signInError);
+    await supabase.auth.admin.deleteUser(userId);
+    return fail("Failed to create client and assign coach", 500);
+  }
+
+  return NextResponse.json(
+    { success: true, refreshToken: signInData.session.refresh_token },
+    { status: 200 }
+  );
 }
