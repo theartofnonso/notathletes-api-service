@@ -21,6 +21,30 @@ function randomPassword(): string {
   return randomBytes(32).toString("base64url") + "Aa1!";
 }
 
+function isAlreadyExistsError(message: string): boolean {
+  const msg = message.toLowerCase();
+  return msg.includes("already") || msg.includes("registered");
+}
+
+async function findAuthUserIdByEmail(email: string): Promise<string | null> {
+  const supabase = getSupabase();
+  let page = 1;
+  const perPage = 1000;
+
+  while (page <= 20) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) return null;
+
+    const match = data.users.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (match) return match.id;
+
+    if (data.users.length < perPage) break;
+    page += 1;
+  }
+
+  return null;
+}
+
 /**
  * POST /client-coach-signup
  * Creates auto-confirmed auth user, clients row, and coach_clients row in one flow.
@@ -67,72 +91,96 @@ export async function POST(request: NextRequest) {
     return fail("Invalid coach");
   }
 
-  const password = randomPassword();
-  const { data: created, error: createUserError } =
-    await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: { full_name: fullName },
-    });
+  const { data: existingClient, error: existingClientError } = await supabase
+    .from("clients")
+    .select("id")
+    .eq("email", email)
+    .maybeSingle();
 
-  if (createUserError || !created.user) {
-    console.error("client-coach-signup createUser:", createUserError);
-    const msg = createUserError?.message?.toLowerCase() ?? "";
-    if (msg.includes("already") || msg.includes("registered")) {
-      return fail("An account with this email already exists");
-    }
+  if (existingClientError) {
+    console.error("client-coach-signup existing client lookup:", existingClientError);
     return fail("Failed to create client and assign coach", 500);
   }
 
-  const userId = created.user.id;
-  const nowIso = new Date().toISOString();
+  const password = randomPassword();
+  let createdNewUser = false;
+  let clientId = existingClient?.id ?? "";
 
-  const { error: clientError } = await supabase.from("clients").insert({
-    id: userId,
-    email,
-    name: fullName,
-    created_at: nowIso,
-    updated_at: nowIso,
-  });
+  if (!clientId) {
+    const { data: created, error: createUserError } =
+      await supabase.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: { full_name: fullName },
+      });
 
-  if (clientError) {
-    console.error("client-coach-signup clients insert:", clientError);
-    await supabase.auth.admin.deleteUser(userId);
-    return fail("Failed to create client and assign coach", 500);
+    if (!createUserError && created.user) {
+      createdNewUser = true;
+      clientId = created.user.id;
+    } else if (isAlreadyExistsError(createUserError?.message ?? "")) {
+      const existingAuthUserId = await findAuthUserIdByEmail(email);
+      if (!existingAuthUserId) {
+        return fail("Failed to create client and assign coach", 500);
+      }
+      clientId = existingAuthUserId;
+    } else {
+      console.error("client-coach-signup createUser:", createUserError);
+      return fail("Failed to create client and assign coach", 500);
+    }
+
+    const { error: clientInsertError } = await supabase.from("clients").insert({
+      id: clientId,
+      email,
+      name: fullName,
+    });
+
+    if (clientInsertError && clientInsertError.code !== "23505") {
+      console.error("client-coach-signup clients insert:", clientInsertError);
+      if (createdNewUser) {
+        await supabase.auth.admin.deleteUser(clientId);
+      }
+      return fail("Failed to create client and assign coach", 500);
+    }
   }
 
   const { error: linkError } = await supabase.from("coach_clients").insert({
     coach_id: coachId,
-    client_id: userId,
+    client_id: clientId,
   });
 
   if (linkError) {
-    console.error("client-coach-signup coach_clients insert:", linkError);
-    await supabase.auth.admin.deleteUser(userId);
     if (linkError.code === "23505") {
-      return fail("This client is already assigned to this coach");
+      return NextResponse.json({ success: true, refreshToken: null }, { status: 200 });
     }
     if (linkError.code === "23503") {
       return fail("Invalid coach or client reference");
     }
+    console.error("client-coach-signup coach_clients insert:", linkError);
+    if (createdNewUser) {
+      await supabase.auth.admin.deleteUser(clientId);
+    }
     return fail("Failed to create client and assign coach", 500);
   }
 
-  const { data: signInData, error: signInError } =
-    await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  let refreshToken: string | null = null;
+  if (createdNewUser) {
+    const { data: signInData, error: signInError } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-  if (signInError || !signInData.session?.refresh_token) {
-    console.error("client-coach-signup signIn:", signInError);
-    await supabase.auth.admin.deleteUser(userId);
-    return fail("Failed to create client and assign coach", 500);
+    if (signInError || !signInData.session?.refresh_token) {
+      console.error("client-coach-signup signIn:", signInError);
+      await supabase.auth.admin.deleteUser(clientId);
+      return fail("Failed to create client and assign coach", 500);
+    }
+    refreshToken = signInData.session.refresh_token;
   }
 
   return NextResponse.json(
-    { success: true, refreshToken: signInData.session.refresh_token },
+    { success: true, refreshToken },
     { status: 200 }
   );
 }
