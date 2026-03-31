@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { formatCoachProfile } from "@/lib/coach-profile-format";
+import { COACH_VISIBLE_OR_FILTER } from "@/lib/internal-coach-domain";
 
 const COACH_SELECT = `
   id,
@@ -38,7 +39,7 @@ export async function GET(request: NextRequest) {
     const { data: coaches, error } = await supabase
       .from("coaches")
       .select(COACH_SELECT)
-      .eq("active", true)
+      .or(COACH_VISIBLE_OR_FILTER)
       .not("coach_profile_id", "is", null)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
