@@ -144,15 +144,46 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  const { error: linkError } = await supabase.from("coach_clients").insert({
-    coach_id: coachId,
-    client_id: clientId,
-  });
+  const { data: existingLink, error: existingLinkError } = await supabase
+    .from("coach_clients")
+    .select("coach_id")
+    .eq("client_id", clientId)
+    .maybeSingle();
 
-  if (linkError) {
-    if (linkError.code !== "23505") {
+  if (existingLinkError) {
+    console.error("client-coach-signup coach_clients lookup:", existingLinkError);
+    if (createdNewUser) {
+      await supabase.auth.admin.deleteUser(clientId);
+    }
+    return fail("Failed to create client and assign coach", 500);
+  }
+
+  if (existingLink) {
+    if (existingLink.coach_id !== coachId) {
+      if (createdNewUser) {
+        await supabase.auth.admin.deleteUser(clientId);
+      }
+      return fail("This client is already assigned to another coach");
+    }
+    // Same coach already linked — continue to session below.
+  } else {
+    const { error: linkError } = await supabase.from("coach_clients").insert({
+      coach_id: coachId,
+      client_id: clientId,
+    });
+
+    if (linkError) {
       if (linkError.code === "23503") {
+        if (createdNewUser) {
+          await supabase.auth.admin.deleteUser(clientId);
+        }
         return fail("Invalid coach or client reference");
+      }
+      if (linkError.code === "23505") {
+        if (createdNewUser) {
+          await supabase.auth.admin.deleteUser(clientId);
+        }
+        return fail("This client is already assigned to another coach");
       }
       console.error("client-coach-signup coach_clients insert:", linkError);
       if (createdNewUser) {
@@ -160,7 +191,6 @@ export async function POST(request: NextRequest) {
       }
       return fail("Failed to create client and assign coach", 500);
     }
-    // 23505: already assigned — still issue a fresh session below.
   }
 
   // Always return a refresh token: set a new password server-side, then sign in.
