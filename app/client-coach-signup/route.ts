@@ -13,6 +13,8 @@ const UUID_REGEX =
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+const LOG = "[client-coach-signup]";
+
 function fail(message: string, status = 400) {
   return NextResponse.json({ success: false, message }, { status });
 }
@@ -75,6 +77,8 @@ export async function POST(request: NextRequest) {
     return fail("coachId must be a valid UUID");
   }
 
+  console.log(LOG, "request", { email, coachId });
+
   const supabase = getSupabase();
 
   const { data: coachRow, error: coachLookupError } = await supabase
@@ -88,6 +92,7 @@ export async function POST(request: NextRequest) {
     return fail("Failed to create client and assign coach", 500);
   }
   if (!coachRow) {
+    console.log(LOG, "fail", { reason: "invalid_coach", coachId });
     return fail("Invalid coach");
   }
 
@@ -149,6 +154,7 @@ export async function POST(request: NextRequest) {
 
     if (clientById) {
       if ((clientById.email ?? "").toLowerCase() !== email) {
+        console.log(LOG, "fail", { reason: "email_mismatch", clientId });
         return fail("Email does not match existing client record");
       }
     } else {
@@ -178,8 +184,16 @@ export async function POST(request: NextRequest) {
 
   if (existingLink) {
     if (existingLink.coach_id !== coachId) {
+      console.log(LOG, "fail", {
+        reason: "other_coach",
+        email,
+        coachId,
+        clientId,
+        existingCoachId: existingLink.coach_id,
+      });
       return fail("This client is already assigned to another coach");
     }
+    console.log(LOG, "already_linked", { email, coachId, clientId });
   } else {
     const { error: linkError } = await supabase.from("coach_clients").insert({
       coach_id: coachId,
@@ -188,6 +202,7 @@ export async function POST(request: NextRequest) {
 
     if (linkError) {
       if (linkError.code === "23503") {
+        console.log(LOG, "fail", { reason: "invalid_reference", email, coachId, clientId });
         return fail("Invalid coach or client reference");
       }
       if (linkError.code === "23505") {
@@ -197,12 +212,21 @@ export async function POST(request: NextRequest) {
           .eq("client_id", clientId)
           .maybeSingle();
         if (!afterRace || afterRace.coach_id !== coachId) {
+          console.log(LOG, "fail", {
+            reason: "other_coach_race",
+            email,
+            coachId,
+            clientId,
+          });
           return fail("This client is already assigned to another coach");
         }
+        console.log(LOG, "already_linked", { email, coachId, clientId });
       } else {
         console.error("client-coach-signup coach_clients insert:", linkError);
         return fail("Failed to create client and assign coach", 500);
       }
+    } else {
+      console.log(LOG, "linked", { email, coachId, clientId });
     }
   }
 
@@ -227,6 +251,8 @@ export async function POST(request: NextRequest) {
     console.error("client-coach-signup signIn:", signInError);
     return fail("Failed to create client and assign coach", 500);
   }
+
+  console.log(LOG, "ok", { email, coachId, clientId });
 
   return NextResponse.json(
     { success: true, refreshToken: signInData.session.refresh_token },
