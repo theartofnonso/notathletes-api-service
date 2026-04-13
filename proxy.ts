@@ -6,6 +6,7 @@ import { getSupabase } from "@/lib/supabase";
 const PROTECTED_PATHS = [
   "/account/delete",
   "/coach-clients",
+  "/unlisted-client-bootstrap",
 ];
 
 export async function proxy(request: NextRequest) {

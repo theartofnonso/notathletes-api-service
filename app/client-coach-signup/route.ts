@@ -1,6 +1,7 @@
 import { randomBytes } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { ensureClientAndCoachAssignment } from "@/lib/client-coach-assignment";
 
 type Body = {
   fullName?: string;
@@ -13,7 +14,7 @@ const UUID_REGEX =
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-const LOG = "[client-coach-signup]";
+const LOG = "client-coach-signup";
 
 function fail(message: string, status = 400) {
   return NextResponse.json({ success: false, message }, { status });
@@ -77,24 +78,9 @@ export async function POST(request: NextRequest) {
     return fail("coachId must be a valid UUID");
   }
 
-  console.log(LOG, "request", { email, coachId });
+  console.log(`[${LOG}]`, "request", { email, coachId });
 
   const supabase = getSupabase();
-
-  const { data: coachRow, error: coachLookupError } = await supabase
-    .from("coaches")
-    .select("id")
-    .eq("id", coachId)
-    .maybeSingle();
-
-  if (coachLookupError) {
-    console.error("client-coach-signup coach lookup:", coachLookupError);
-    return fail("Failed to create client and assign coach", 500);
-  }
-  if (!coachRow) {
-    console.log(LOG, "fail", { reason: "invalid_coach", coachId });
-    return fail("Invalid coach");
-  }
 
   const { data: clientByEmail, error: clientByEmailError } = await supabase
     .from("clients")
@@ -141,93 +127,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const { data: clientById, error: clientByIdError } = await supabase
-      .from("clients")
-      .select("id, email")
-      .eq("id", clientId)
-      .maybeSingle();
-
-    if (clientByIdError) {
-      console.error("client-coach-signup client by id:", clientByIdError);
-      return fail("Failed to create client and assign coach", 500);
-    }
-
-    if (clientById) {
-      if ((clientById.email ?? "").toLowerCase() !== email) {
-        console.log(LOG, "fail", { reason: "email_mismatch", clientId });
-        return fail("Email does not match existing client record");
-      }
-    } else {
-      const { error: clientInsertError } = await supabase.from("clients").insert({
-        id: clientId,
-        email,
-        name: fullName,
-      });
-
-      if (clientInsertError && clientInsertError.code !== "23505") {
-        console.error("client-coach-signup clients insert:", clientInsertError);
-        return fail("Failed to create client and assign coach", 500);
-      }
-    }
   }
 
-  const { data: existingLink, error: existingLinkError } = await supabase
-    .from("coach_clients")
-    .select("coach_id")
-    .eq("client_id", clientId)
-    .maybeSingle();
-
-  if (existingLinkError) {
-    console.error("client-coach-signup coach_clients lookup:", existingLinkError);
-    return fail("Failed to create client and assign coach", 500);
+  const assignment = await ensureClientAndCoachAssignment({
+    supabase,
+    clientId,
+    email,
+    fullName,
+    coachId,
+    logLabel: LOG,
+  });
+  if (!assignment.ok) {
+    return fail(assignment.message, assignment.status ?? 400);
   }
-
-  if (existingLink) {
-    if (existingLink.coach_id !== coachId) {
-      console.log(LOG, "fail", {
-        reason: "other_coach",
-        email,
-        coachId,
-        clientId,
-        existingCoachId: existingLink.coach_id,
-      });
-      return fail("This client is already assigned to another coach");
-    }
-    console.log(LOG, "already_linked", { email, coachId, clientId });
-  } else {
-    const { error: linkError } = await supabase.from("coach_clients").insert({
-      coach_id: coachId,
-      client_id: clientId,
-    });
-
-    if (linkError) {
-      if (linkError.code === "23503") {
-        console.log(LOG, "fail", { reason: "invalid_reference", email, coachId, clientId });
-        return fail("Invalid coach or client reference");
-      }
-      if (linkError.code === "23505") {
-        const { data: afterRace } = await supabase
-          .from("coach_clients")
-          .select("coach_id")
-          .eq("client_id", clientId)
-          .maybeSingle();
-        if (!afterRace || afterRace.coach_id !== coachId) {
-          console.log(LOG, "fail", {
-            reason: "other_coach_race",
-            email,
-            coachId,
-            clientId,
-          });
-          return fail("This client is already assigned to another coach");
-        }
-        console.log(LOG, "already_linked", { email, coachId, clientId });
-      } else {
-        console.error("client-coach-signup coach_clients insert:", linkError);
-        return fail("Failed to create client and assign coach", 500);
-      }
-    } else {
-      console.log(LOG, "linked", { email, coachId, clientId });
-    }
+  if (assignment.alreadyLinked) {
+    return NextResponse.json({ success: true }, { status: 409 });
   }
 
   // Always return a refresh token: set a new password server-side, then sign in.
@@ -252,7 +166,7 @@ export async function POST(request: NextRequest) {
     return fail("Failed to create client and assign coach", 500);
   }
 
-  console.log(LOG, "ok", { email, coachId, clientId });
+  console.log(`[${LOG}]`, "ok", { email, coachId, clientId });
 
   return NextResponse.json(
     { success: true, refreshToken: signInData.session.refresh_token },
